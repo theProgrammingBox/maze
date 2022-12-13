@@ -1,176 +1,234 @@
 #include <iostream>
 #include <stack>
-using namespace std;
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
 
-class OneLoneCoder_Maze : public olc::PixelGameEngine
+using olc::vi2d;
+using std::vector;
+
+class Maze : public olc::PixelGameEngine
 {
 public:
-	OneLoneCoder_Maze()
+	int mazeWidth;
+	int mazeHeight;
+
+	int mazeRealWidth;
+	int mazeRealHeight;
+
+	int mazeRealWidthLimit;
+	int mazeRealHeightLimit;
+	
+	uint8_t* maze;				// physical maze, 2x2 cells
+	uint8_t* mazeDirections;	// open directions from each cell to its neighbours
+	
+	vi2d playerPosition;	// same as a pair, stores x and y coordinates
+	vi2d goalPosition;		// same as a pair, stores x and y coordinates
+	
+	const vi2d directions[4] = { {0, 1}, {-1, 0}, {0, -1}, {1, 0} };
+
+	enum MazeBits
 	{
-		sAppName = "MAZE";
-	}
-
-private:
-	int  m_nMazeWidth;
-	int  m_nMazeHeight;
-	int* m_maze;
-
-
-	// Some bit fields for convenience
-	enum
-	{
-		CELL_PATH_N = 0x01,
-		CELL_PATH_E = 0x02,
-		CELL_PATH_S = 0x04,
-		CELL_PATH_W = 0x08,
-		CELL_VISITED = 0x10,
+		UP = 0x01,		// 0000 0001
+		LEFT = 0x02,	// 0000 0010
+		DOWN = 0x04,	// 0000 0100
+		RIGHT = 0x08,	// 0000 1000
+		VISITED = 0x10,	// 0001 0000
+		PATH = 0x20		// 0010 0000
 	};
 
-
-	// Algorithm variables
-	int  m_nVisitedCells;
-	stack<pair<int, int>> m_stack;	// (x, y) coordinate pairs
-	int  m_nPathWidth;
-
-
-protected:
-	// Called by olcConsoleGameEngine
-	virtual bool OnUserCreate()
+	vector<vi2d> shortestPath;	// DFS result;
+	float timer = 0.0f;
+	float timeStep;
+	
+	Maze(int mazeWidth, int mazeHeight, float timeStep)
 	{
-		// Maze parameters
-		m_nMazeWidth = 40;
-		m_nMazeHeight = 25;
-		m_maze = new int[m_nMazeWidth * m_nMazeHeight];
-		memset(m_maze, 0x00, m_nMazeWidth * m_nMazeHeight * sizeof(int));
-		m_nPathWidth = 3;
+		sAppName = "Maze";
+		
+		this->mazeWidth = mazeWidth;
+		this->mazeHeight = mazeHeight;
+		this->timeStep = timeStep;
 
-		// Choose a starting cell
-		int x = rand() % m_nMazeWidth;
-		int y = rand() % m_nMazeHeight;
-		m_stack.push(make_pair(x, y));
-		m_maze[y * m_nMazeWidth + x] = CELL_VISITED;
-		m_nVisitedCells = 1;
-
-		return true;
+		mazeRealWidth = mazeWidth * 2;
+		mazeRealHeight = mazeHeight * 2;
+		
+		maze = new uint8_t[mazeRealWidth * mazeRealHeight];		// 2x2 cells, 1 = path, 0 = no path
+		mazeDirections = new uint8_t[mazeWidth * mazeHeight];	// each cell describes if it is up, left, down, right, and visited
 	}
 
-	// Called by olcConsoleGameEngine
-	virtual bool OnUserUpdate(float fElapsedTime)
+	~Maze()
 	{
-		// Slow down for animation
-		this_thread::sleep_for(10ms);
+		delete[] maze;
+	}
 
-		// Little lambda function to calculate index in a readable way
-		auto offset = [&](int x, int y)
+	void GenerateMaze()
+	{
+		// clear paths and connections
+		memset(maze, 0, sizeof(uint8_t) * mazeRealWidth * mazeRealHeight);		// set all cells to no path
+		memset(mazeDirections, 0, sizeof(uint8_t) * mazeWidth * mazeHeight);	// set all cells to no connections and not visited
+		
+		vector<vi2d> stack;
+		stack.push_back({ 0, 0 });
+		mazeDirections[0] |= VISITED;
+		
+		while (!stack.empty())
 		{
-			return (m_stack.top().second + y) * m_nMazeWidth + (m_stack.top().first + x);
-		};
+			vi2d current = stack.back();
 
-		// Do Maze Algorithm
-		if (m_nVisitedCells < m_nMazeWidth * m_nMazeHeight)
-		{
-			// Create a set of unvisted neighbours
-			vector<int> neighbours;
+			vi2d nextPos;
+			vector<uint8_t> neighbours;
 
-			// North neighbour
-			if (m_stack.top().second > 0 && (m_maze[offset(0, -1)] & CELL_VISITED) == 0)
-				neighbours.push_back(0);
-			// East neighbour
-			if (m_stack.top().first < m_nMazeWidth - 1 && (m_maze[offset(1, 0)] & CELL_VISITED) == 0)
-				neighbours.push_back(1);
-			// South neighbour
-			if (m_stack.top().second < m_nMazeHeight - 1 && (m_maze[offset(0, 1)] & CELL_VISITED) == 0)
-				neighbours.push_back(2);
-			// West neighbour
-			if (m_stack.top().first > 0 && (m_maze[offset(-1, 0)] & CELL_VISITED) == 0)
-				neighbours.push_back(3);
-
-			// Are there any neighbours available?
-			if (!neighbours.empty())
+			for (int i = 0; i < 4; i++)
 			{
-				// Choose one available neighbour at random
-				int next_cell_dir = neighbours[rand() % neighbours.size()];
+				nextPos = current + directions[i];
+				
+				if (nextPos.x >= 0 && nextPos.x < mazeWidth && nextPos.y >= 0 && nextPos.y < mazeHeight && !(mazeDirections[nextPos.y * mazeWidth + nextPos.x] & VISITED))
+					neighbours.push_back(i);
+			}
 
-				// Create a path between the neighbour and the current cell
-				switch (next_cell_dir)
-				{
-				case 0: // North
-					m_maze[offset(0, -1)] |= CELL_VISITED | CELL_PATH_S;
-					m_maze[offset(0, 0)] |= CELL_PATH_N;
-					m_stack.push(make_pair((m_stack.top().first + 0), (m_stack.top().second - 1)));
-					break;
-
-				case 1: // East
-					m_maze[offset(+1, 0)] |= CELL_VISITED | CELL_PATH_W;
-					m_maze[offset(0, 0)] |= CELL_PATH_E;
-					m_stack.push(make_pair((m_stack.top().first + 1), (m_stack.top().second + 0)));
-					break;
-
-				case 2: // South
-					m_maze[offset(0, +1)] |= CELL_VISITED | CELL_PATH_N;
-					m_maze[offset(0, 0)] |= CELL_PATH_S;
-					m_stack.push(make_pair((m_stack.top().first + 0), (m_stack.top().second + 1)));
-					break;
-
-				case 3: // West
-					m_maze[offset(-1, 0)] |= CELL_VISITED | CELL_PATH_E;
-					m_maze[offset(0, 0)] |= CELL_PATH_W;
-					m_stack.push(make_pair((m_stack.top().first - 1), (m_stack.top().second + 0)));
-					break;
-
-				}
-
-				m_nVisitedCells++;
+			if (neighbours.empty())
+			{
+				stack.pop_back();
 			}
 			else
 			{
-				// No available neighbours so backtrack!
-				m_stack.pop();
+				int direction = neighbours[rand() % neighbours.size()];
+				nextPos = current + directions[direction];
+				
+				mazeDirections[current.y * mazeWidth + current.x] |= (1 << direction);				// set the direction bit to 1
+				mazeDirections[nextPos.y * mazeWidth + nextPos.x] |= (1 << (direction + 2) % 4);	// opposite direction
+				mazeDirections[nextPos.y * mazeWidth + nextPos.x] |= VISITED;	// set the new cell as visited
+				stack.push_back(nextPos);										// add the new cell to the stack
 			}
 		}
-
-
-		// === DRAWING STUFF ===
-
-		// Clear Screen by drawing 'spaces' everywhere
-		Clear(olc::BLANK);
-
-		// Draw Maze
-		for (int x = 0; x < m_nMazeWidth; x++)
+		
+		int mazex;
+		int mazey;
+		for (int y = 0; y < mazeHeight; y++)
 		{
-			for (int y = 0; y < m_nMazeHeight; y++)
+			for (int x = 0; x < mazeWidth; x++)
 			{
-				// Each cell is inflated by m_nPathWidth, so fill it in
-				for (int py = 0; py < m_nPathWidth; py++)
-					for (int px = 0; px < m_nPathWidth; px++)
-					{
-						if (m_maze[y * m_nMazeWidth + x] & CELL_VISITED)
-							Draw(x * (m_nPathWidth + 1) + px, y * (m_nPathWidth + 1) + py); // Draw Cell
-						else
-							Draw(x * (m_nPathWidth + 1) + px, y * (m_nPathWidth + 1) + py, olc::BLACK); // Draw Cell
-					}
-
-				// Draw passageways between cells
-				for (int p = 0; p < m_nPathWidth; p++)
+				mazex = x * 2;
+				mazey = y * 2;
+				
+				maze[mazey * mazeRealWidth + mazex] |= PATH;			// set the center cell to path
+				
+				if (mazeDirections[y * mazeWidth + x] & UP)
 				{
-					if (m_maze[y * m_nMazeWidth + x] & CELL_PATH_S)
-						Draw(x * (m_nPathWidth + 1) + p, y * (m_nPathWidth + 1) + m_nPathWidth); // Draw South Passage
-
-					if (m_maze[y * m_nMazeWidth + x] & CELL_PATH_E)
-						Draw(x * (m_nPathWidth + 1) + m_nPathWidth, y * (m_nPathWidth + 1) + p); // Draw East Passage
+					maze[(mazey + 1) * mazeRealWidth + mazex] |= PATH;	// set the top cell to path
+				}
+				if (mazeDirections[y * mazeWidth + x] & RIGHT)
+				{
+					maze[mazey * mazeRealWidth + mazex + 1] |= PATH;	// set the right cell to path
 				}
 			}
 		}
 
-		// Draw Unit - the top of the stack
-		for (int py = 0; py < m_nPathWidth; py++)
-			for (int px = 0; px < m_nPathWidth; px++)
-				Draw(m_stack.top().first * (m_nPathWidth + 1) + px, m_stack.top().second * (m_nPathWidth + 1) + py, olc::RED); // Draw Cell
+		//randomize player and goal
+		do
+		{
+			playerPosition = { rand() % mazeRealWidth, rand() % mazeRealHeight };
+		} while (!(maze[playerPosition.y * mazeRealWidth + playerPosition.x] & PATH));
+		
+		do
+		{
+			goalPosition = { rand() % mazeRealWidth, rand() % mazeRealHeight };
+		} while (!(maze[goalPosition.y * mazeRealWidth + goalPosition.x] & PATH));
+	}
 
+	// use DFS to find the shortest path, return the path
+	void FindShortestPath()
+	{
+		shortestPath.clear();
+		for (int i = 0; i < mazeRealWidth * mazeRealHeight; i++)
+			maze[i] &= ~VISITED;	// make all spots unvisited
+		
+		DFS(playerPosition, goalPosition);
+	}
 
+	// use DFS to find the shortest path, return the path
+	bool DFS(vi2d current, vi2d goal)
+	{
+		if (current == goal)
+		{
+			shortestPath.push_back(current);
+			return true;
+		}
+
+		maze[current.y * mazeRealWidth + current.x] |= VISITED;
+		
+		vi2d nextPos;
+		for (int i = 0; i < 4; i++)
+		{
+			nextPos = current + directions[i];
+
+			if (nextPos.x >= 0 && nextPos.x < mazeRealWidth && nextPos.y >= 0 && nextPos.y < mazeRealHeight && (maze[nextPos.y * mazeRealWidth + nextPos.x] & PATH) && !(maze[nextPos.y * mazeRealWidth + nextPos.x] & VISITED))
+			{
+				if (DFS(nextPos, goal))
+				{
+					shortestPath.push_back(current);
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+	
+	bool OnUserCreate()
+	{
+		GenerateMaze();		// generate the maze directions and fill the maze array
+		FindShortestPath();	// find the shortest path from player to goal
+		
+		return true;
+	}
+
+	bool OnUserUpdate(float fElapsedTime)
+	{
+		if (GetKey(olc::SPACE).bPressed)
+		{
+			GenerateMaze();		// generate the maze directions and fill the maze array
+		}
+		
+		Clear(olc::BLACK);	// clear the screen
+		
+		// draw the maze
+		for (int y = 0; y < mazeRealHeight; y++)
+			for (int x = 0; x < mazeRealWidth; x++)
+				if (maze[y * mazeRealWidth + x])
+					Draw(x, y);
+		
+		// draw the shortest path
+		for (int i = 0; i < shortestPath.size(); i++)
+		{
+			Draw(shortestPath[i], olc::BLUE);
+		}
+		
+		// draw the player and goal
+		Draw(playerPosition, olc::GREEN);
+		Draw(goalPosition, olc::RED);
+
+		//move the player based on the next cell in the shortest path
+		if (playerPosition != goalPosition)
+		{
+			timer += fElapsedTime;
+			if (timer >= timeStep)
+			{
+				timer -= timeStep;
+				shortestPath.pop_back();
+				playerPosition = shortestPath.back();
+			}
+		}
+		else
+		{
+			do
+			{
+				goalPosition = { rand() % mazeRealWidth, rand() % mazeRealHeight };
+			} while (!(maze[goalPosition.y * mazeRealWidth + goalPosition.x] & PATH));
+			
+			FindShortestPath();	// find the shortest path from player to goal
+		}
+		
 		return true;
 	}
 };
@@ -178,11 +236,12 @@ protected:
 
 int main()
 {
-	// Seed random number generator
-	srand(clock());
+	const int mazeWidth = 32;
+	const int mazeHeight = 16;
+	const float timeStep = 0.06f;
 
-	OneLoneCoder_Maze demo;
-	if (demo.Construct(160, 100, 8, 8))
+	Maze demo(mazeWidth, mazeHeight, timeStep);
+	if (demo.Construct(demo.mazeRealWidth, demo.mazeRealHeight, 16, 16))
 		demo.Start();
 
 	return 0;
