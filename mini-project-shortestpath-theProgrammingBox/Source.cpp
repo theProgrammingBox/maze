@@ -173,6 +173,39 @@ public:
 
 		return false;
 	}
+
+	void FindShortestPath2()	// stack method
+	{
+		shortestPath.clear();
+		for (int i = 0; i < mazeRealWidth * mazeRealHeight; i++)
+			maze[i] &= ~VISITED;	// make all spots unvisited
+		
+		shortestPath.push_back(playerPosition);
+		maze[playerPosition.y * mazeRealWidth + playerPosition.x] |= VISITED;	// mark cell is visited
+		
+		vi2d nextPos;
+		while (!shortestPath.empty())
+		{
+			vi2d current = shortestPath.back();
+			shortestPath.pop_back();
+
+			if (current == goalPosition)	// end once the goal is found
+			{
+				shortestPath.push_back(current);
+				break;
+			}
+
+			for (int i = 0; i < 4; i++)	// dps all neighboring cells
+			{
+				nextPos = current + directions[i];
+				if (nextPos.x >= 0 && nextPos.x < mazeRealWidth && nextPos.y >= 0 && nextPos.y < mazeRealHeight && (maze[nextPos.y * mazeRealWidth + nextPos.x] & PATH) && !(maze[nextPos.y * mazeRealWidth + nextPos.x] & VISITED))
+				{
+					shortestPath.push_back(nextPos);
+					maze[nextPos.y * mazeRealWidth + nextPos.x] |= VISITED;	// mark cell is visited
+				}
+			}
+		}
+	}
 	
 	bool OnUserCreate()
 	{
@@ -242,7 +275,7 @@ int main()
 	const int MAZE_HEIGHT = 64;		// height of the maze
 	const float TIME_STEP = 0.002f;	// time (ms) between each action
 	const int TRAIN_LENGTH = 128;	// length of the player trail
-	const int PIXEL_SIZE = 3;		// size of each pixel
+	const int PIXEL_SIZE = 6;		// size of each pixel
 
 	Maze demo(MAZE_WIDTH, MAZE_HEIGHT, TIME_STEP, TRAIN_LENGTH);
 	if (demo.Construct(demo.mazeRealWidth, demo.mazeRealHeight, PIXEL_SIZE, PIXEL_SIZE))
