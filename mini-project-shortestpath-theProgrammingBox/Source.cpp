@@ -271,8 +271,8 @@ public:
 
 int main()
 {
-	const int MAZE_WIDTH = 128;		// width of the maze
-	const int MAZE_HEIGHT = 64;		// height of the maze
+	const int MAZE_WIDTH = 64;		// width of the maze
+	const int MAZE_HEIGHT = 32;		// height of the maze
 	const float TIME_STEP = 0.002f;	// time (ms) between each action
 	const int TRAIN_LENGTH = 128;	// length of the player trail
 	const int PIXEL_SIZE = 6;		// size of each pixel
