@@ -1,5 +1,7 @@
 #include <iostream>
-#include <stack>
+#include <queue>
+#include <chrono>
+#include <utility>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
@@ -7,6 +9,11 @@
 using olc::vi2d;
 using olc::Pixel;
 using std::vector;
+using std::queue;
+using std::chrono::high_resolution_clock;
+using std::chrono::duration_cast;
+using std::chrono::nanoseconds;
+using std::pair;
 
 class Maze : public olc::PixelGameEngine
 {
@@ -40,7 +47,10 @@ public:
 	float TIME_STEP;			// time between each DFS step
 
 	int TRAIN_LENGTH;			// length of player trail
-	vector<vi2d> playerTrail;	// completely cosmetics
+	vi2d* playerTrail;			// completely cosmetics
+	int trailIndex = 0;			// keeps track of the circular array, instead of using a queue cuz fast
+
+	unsigned int seed;			// seed for the xor random number generator
 	
 	Maze(int MAZE_WIDTH, int MAZE_HEIGHT, float TIME_STEP, int TRAIN_LENGTH)
 	{
@@ -56,31 +66,44 @@ public:
 		
 		maze = new uint8_t[mazeRealWidth * mazeRealHeight];		// 2x2 nodes, each cell describes a path/wall and if it has been visited during solving
 		mazeDirections = new uint8_t[MAZE_WIDTH * MAZE_HEIGHT];	// each cell describes if it is up, left, down, right, and if it has been visited during generating
+
+		playerTrail = new vi2d[TRAIN_LENGTH];	// a trail behind the player, completely cosmetics
+		
+		seed = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 	}
 
 	~Maze()
 	{
 		delete[] maze;
 		delete[] mazeDirections;
+		delete[] playerTrail;
 	}
 
-	void GenerateMaze()
+	unsigned int Rand2()	//xorshift32
+	{
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		return seed;
+	}
+
+	void RandomizeMaze()
 	{
 		memset(maze, 0, sizeof(uint8_t) * mazeRealWidth * mazeRealHeight);		// set all cells to no path
 		memset(mazeDirections, 0, sizeof(uint8_t) * MAZE_WIDTH * MAZE_HEIGHT);	// set all cells to no connections and not visited
-		
+
 		vector<vi2d> stack;
 		stack.push_back({ MAZE_WIDTH / 2, MAZE_HEIGHT / 2 });						// start at the middle of the maze
-		mazeDirections[stack.back().x + stack.back().y * MAZE_WIDTH] |= VISITED;	// mark the middle node as visited
-		
+
 		vi2d nextPos;
 		vector<uint8_t> neighbours;
 		while (!stack.empty())
 		{
 			neighbours.clear();
 			vi2d current = stack.back();
+			mazeDirections[current.x + current.y * MAZE_WIDTH] |= VISITED;		// mark current node as visited
 
-			for (int i = 0; i < 4; i++)
+			for (int i = 4; i--;)
 			{
 				nextPos = current + directions[i];
 				if (nextPos.x >= 0 && nextPos.x < MAZE_WIDTH && nextPos.y >= 0 && nextPos.y < MAZE_HEIGHT && !(mazeDirections[nextPos.y * MAZE_WIDTH + nextPos.x] & VISITED))
@@ -93,27 +116,26 @@ public:
 			}
 			else
 			{
-				int direction = neighbours[rand() % neighbours.size()];
+				int direction = neighbours[Rand2() % neighbours.size()];
 				nextPos = current + directions[direction];
-				
+
 				mazeDirections[current.y * MAZE_WIDTH + current.x] |= (1 << direction);				// set the direction bit to 1, reference MazeBits
 				mazeDirections[nextPos.y * MAZE_WIDTH + nextPos.x] |= (1 << (direction + 2) % 4);	// opposite direction, loop around the direction bit
-				mazeDirections[nextPos.y * MAZE_WIDTH + nextPos.x] |= VISITED;	// set the new cell as visited
-				stack.push_back(nextPos);										// add the new cell to the stack
+				stack.push_back(nextPos);	// add the new cell to the stack
 			}
 		}
-		
+
 		int mazex;
 		int mazey;
-		for (int y = 0; y < MAZE_HEIGHT; y++)
+		for (int x = MAZE_WIDTH; x--;)
 		{
-			for (int x = 0; x < MAZE_WIDTH; x++)
+			for (int y = MAZE_HEIGHT; y--;)
 			{
 				mazex = x << 1;	// convert to cell space
 				mazey = y << 1;	// convert to cell space
-				
+
 				maze[mazey * mazeRealWidth + mazex] |= PATH;			// set the center cell to path
-				
+
 				if (mazeDirections[y * MAZE_WIDTH + x] & UP)
 				{
 					maze[(mazey + 1) * mazeRealWidth + mazex] |= PATH;	// set the top cell to path
@@ -124,146 +146,144 @@ public:
 				}
 			}
 		}
+	}
 
+	void RandomizePlayer()
+	{
 		do
 		{	// randomize player position
-			playerPosition = { rand() % mazeRealWidth, rand() % mazeRealHeight };
-		} while (!(maze[playerPosition.y * mazeRealWidth + playerPosition.x] & PATH));
+			playerPosition = { int(Rand2() % mazeRealWidth), int(Rand2() % mazeRealHeight) };
+		} while (!(maze[playerPosition.y * mazeRealWidth + playerPosition.x] & PATH || goalPosition == playerPosition));
 		
+		for (int i = TRAIN_LENGTH; i--;) playerTrail[i] = playerPosition;	// player trail setup
+	}
+
+	void RandomizeGoal()
+	{
 		do
 		{	// randomize goal position
-			goalPosition = { rand() % mazeRealWidth, rand() % mazeRealHeight };
-		} while (!(maze[goalPosition.y * mazeRealWidth + goalPosition.x] & PATH));
-
-		playerTrail.clear();
+			goalPosition = { int(Rand2() % mazeRealWidth), int(Rand2() % mazeRealHeight) };
+		} while (!(maze[goalPosition.y * mazeRealWidth + goalPosition.x] & PATH || goalPosition == playerPosition));
 	}
 
-	void FindShortestPath()	// DFS method
+	void FindShortestPath()	//BFS
 	{
-		shortestPath.clear();
-		for (int i = 0; i < mazeRealWidth * mazeRealHeight; i++)
-			maze[i] &= ~VISITED;	// make all spots unvisited
+		int* distances = new int[mazeRealWidth * mazeRealHeight];
+		memset(distances, -1, sizeof(int) * mazeRealWidth * mazeRealHeight);
+		distances[goalPosition.y * mazeRealWidth + goalPosition.x] = 0;
 		
-		DFS(playerPosition, goalPosition);
-	}
-
-	bool DFS(vi2d current, vi2d goal)
-	{
-		if (current == goal)	// end once the goal is found
-		{
-			shortestPath.push_back(current);
-			return true;
-		}
-
-		maze[current.y * mazeRealWidth + current.x] |= VISITED;	// mark cell is visited
+		queue<vi2d> queue;
+		queue.push(goalPosition);
 		
+		vi2d current;
 		vi2d nextPos;
-		for (int i = 0; i < 4; i++)	// dps all neighboring cells
+		while (!queue.empty())
 		{
-			nextPos = current + directions[i];
-			if (nextPos.x >= 0 && nextPos.x < mazeRealWidth && nextPos.y >= 0 && nextPos.y < mazeRealHeight && (maze[nextPos.y * mazeRealWidth + nextPos.x] & PATH) && !(maze[nextPos.y * mazeRealWidth + nextPos.x] & VISITED))
-			{
-				if (DFS(nextPos, goal))
-				{
-					shortestPath.push_back(current);
-					return true;
-				}
-			}
-		}
+			current = queue.front();
+			queue.pop();
 
-		return false;
-	}
-
-	void FindShortestPath2()	// stack method
-	{
-		shortestPath.clear();
-		for (int i = 0; i < mazeRealWidth * mazeRealHeight; i++)
-			maze[i] &= ~VISITED;	// make all spots unvisited
-		
-		shortestPath.push_back(playerPosition);
-		maze[playerPosition.y * mazeRealWidth + playerPosition.x] |= VISITED;	// mark cell is visited
-		
-		vi2d nextPos;
-		while (!shortestPath.empty())
-		{
-			vi2d current = shortestPath.back();
-			shortestPath.pop_back();
-
-			if (current == goalPosition)	// end once the goal is found
-			{
-				shortestPath.push_back(current);
-				break;
-			}
-
-			for (int i = 0; i < 4; i++)	// dps all neighboring cells
+			for (int i = 4; i--;)
 			{
 				nextPos = current + directions[i];
-				if (nextPos.x >= 0 && nextPos.x < mazeRealWidth && nextPos.y >= 0 && nextPos.y < mazeRealHeight && (maze[nextPos.y * mazeRealWidth + nextPos.x] & PATH) && !(maze[nextPos.y * mazeRealWidth + nextPos.x] & VISITED))
+				if (nextPos.x >= 0 && nextPos.x < mazeRealWidth && nextPos.y >= 0 && nextPos.y < mazeRealHeight && distances[nextPos.y * mazeRealWidth + nextPos.x] == -1 && maze[nextPos.y * mazeRealWidth + nextPos.x] & PATH)
 				{
-					shortestPath.push_back(nextPos);
-					maze[nextPos.y * mazeRealWidth + nextPos.x] |= VISITED;	// mark cell is visited
+					distances[nextPos.y * mazeRealWidth + nextPos.x] = distances[current.y * mazeRealWidth + current.x] + 1;
+					queue.push(nextPos);
 				}
 			}
+		}
+		
+		shortestPath.resize(distances[playerPosition.y * mazeRealWidth + playerPosition.x]);
+		current = playerPosition;
+		for (int i = shortestPath.size(); i--;)
+		{
+			for (int j = 4; j--;)
+			{
+				nextPos = current + directions[j];
+				if (nextPos.x >= 0 && nextPos.x < mazeRealWidth && nextPos.y >= 0 && nextPos.y < mazeRealHeight && distances[nextPos.y * mazeRealWidth + nextPos.x] == distances[current.y * mazeRealWidth + current.x] - 1)
+					break;
+			}
+			shortestPath[i] = nextPos;
+			current = nextPos;
+		}
+		
+		delete[] distances;
+	}
+
+	void NewScene()
+	{
+		RandomizeMaze();	// randomize the maze
+		RandomizePlayer();	// randomize the player position
+		RandomizeGoal();	// randomize the goal position
+		FindShortestPath();	// find the shortest path to the goal
+	}
+
+	void DrawMaze()
+	{
+		for (int x = mazeRealWidth; x--;)
+			for (int y = mazeRealHeight; y--;)
+				if (maze[y * mazeRealWidth + x])
+					Draw(x, y, Pixel(240, 240, 240));	// whitish grey
+	}
+
+	void DrawGoalTrail()
+	{
+		int color;
+		for (int i = shortestPath.size(); i--;)
+		{
+			color = 150 * i / shortestPath.size() + 50;
+			Draw(shortestPath[i], Pixel(color, color, 255));	// blue
+		}
+	}
+
+	void DrawPlayerTrail()
+	{
+		int color;
+		for (int i = TRAIN_LENGTH; i--;)
+		{
+			color = 150 * i / TRAIN_LENGTH + 50;
+			Draw(playerTrail[trailIndex++], Pixel(color, 255, color));	// green
+			trailIndex -= (trailIndex == TRAIN_LENGTH) * TRAIN_LENGTH;
+		}
+	}
+
+	void MovePlayer(float fElapsedTime)
+	{
+		if (playerPosition != goalPosition)
+		{
+			timer += fElapsedTime;
+			if (timer >= TIME_STEP)	// move towards the goal every TIME_STEP ms
+			{
+				timer -= TIME_STEP;											// reset timer
+				playerTrail[trailIndex++] = playerPosition;					// add current position to trail
+				trailIndex -= (trailIndex >= TRAIN_LENGTH) * TRAIN_LENGTH;	// reset trail index if it goes over the trail length
+				shortestPath.pop_back();									// remove the last position from the shortest path
+				playerPosition = shortestPath.back();						// set the player position to the last position in the shortest path
+			}
+		}
+		else
+		{
+			RandomizeGoal();	// randomize the goal
+			FindShortestPath();	// find the new shortest path
 		}
 	}
 	
 	bool OnUserCreate()
 	{
-		GenerateMaze();		// generate the maze directions, fill the maze array, and randomize player and goal
-		FindShortestPath();	// find the shortest path from player to goal
+		NewScene();
 		
 		return true;
 	}
 
 	bool OnUserUpdate(float fElapsedTime)
 	{
-		if (GetKey(olc::SPACE).bPressed)
-		{
-			GenerateMaze();		// generate the maze directions, fill the maze array, and randomize player and goal
-			FindShortestPath();	// find the shortest path from player to goal
-			Clear(olc::BLACK);	// clear the screen
-		}
+		if (GetKey(olc::SPACE).bPressed) NewScene();
 		
-		for (int y = 0; y < mazeRealHeight; y++)	// draw the maze
-			for (int x = 0; x < mazeRealWidth; x++)
-				if (maze[y * mazeRealWidth + x])
-					Draw(x, y);
-		
-		for (int i = 0; i < shortestPath.size(); i++)	// draw the shortest path
-			Draw(shortestPath[i], Pixel(200,200,255));	// rgb
-		
-		Draw(goalPosition, olc::RED);		// draw goal
-
-		for (int i = 0; i < TRAIN_LENGTH; i++)	// draw the player trail
-		{
-			if (i >= playerTrail.size())
-				break;
-			int color = 255 * (TRAIN_LENGTH - i) / TRAIN_LENGTH;
-			Draw(playerTrail[i], Pixel(color, 255, color));	// rgb
-		}
-
-		if (playerPosition != goalPosition)
-		{
-			timer += fElapsedTime;
-			if (timer >= TIME_STEP)	// move towards the goal every TIME_STEP ms
-			{
-				timer -= TIME_STEP;
-				playerTrail.push_back(playerPosition);
-				if (playerTrail.size() > TRAIN_LENGTH)
-					playerTrail.erase(playerTrail.begin());
-				shortestPath.pop_back();
-				playerPosition = shortestPath.back();
-			}
-		}
-		else
-		{
-			do
-			{	// randomize the goal
-				goalPosition = { rand() % mazeRealWidth, rand() % mazeRealHeight };
-			} while (!(maze[goalPosition.y * mazeRealWidth + goalPosition.x] & PATH));
-			
-			FindShortestPath();	// find the shortest path from player to goal
-		}
+		Clear(Pixel(30, 30, 30));	// clear the screen with blackish grey
+		DrawMaze();
+		DrawGoalTrail();
+		DrawPlayerTrail();
+		MovePlayer(fElapsedTime);
 		
 		return true;
 	}
@@ -271,11 +291,11 @@ public:
 
 int main()
 {
-	const int MAZE_WIDTH = 64;		// width of the maze
-	const int MAZE_HEIGHT = 32;		// height of the maze
-	const float TIME_STEP = 0.002f;	// time (ms) between each action
-	const int TRAIN_LENGTH = 128;	// length of the player trail
-	const int PIXEL_SIZE = 6;		// size of each pixel
+	const int MAZE_WIDTH = 256;		// width of the maze
+	const int MAZE_HEIGHT = 128;	// height of the maze
+	const float TIME_STEP = 0.001f;	// time (ms) between each action
+	const int TRAIN_LENGTH = 256;	// length of the player trail
+	const int PIXEL_SIZE = 2;		// size of each pixel
 
 	Maze demo(MAZE_WIDTH, MAZE_HEIGHT, TIME_STEP, TRAIN_LENGTH);
 	if (demo.Construct(demo.mazeRealWidth, demo.mazeRealHeight, PIXEL_SIZE, PIXEL_SIZE))
