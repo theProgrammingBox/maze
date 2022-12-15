@@ -31,6 +31,7 @@ public:
 	uint8_t* maze;				// maze with walls
 	uint8_t* mazeAttributes;	// path directions from each maze component to its neighbours and other attributes
 	size_t* distances;			// orthoganal distance from each cell away from the goal
+	float* drawingColor;		// purely cosmetic, used to fade between past and current distance colors
 	
 	vi2d playerPosition;		// same as a pair, stores x and y coordinates of the player
 	vi2d goalPosition;			// same as a pair, stores x and y coordinates of the goal
@@ -52,7 +53,7 @@ public:
 	float FPS;					// how many frames to update per second
 
 	int TRAIL_LENGTH;			// length of player trail
-	vi2d* playerTrail;			// completely cosmetics, list of previous player positions up to TRAIL_LENGTH positions long
+	vi2d* playerTrail;			// purely cosmetic, list of previous player positions up to TRAIL_LENGTH positions long
 	int trailIndex = 0;			// keeps track of the circular array, instead of using a queue cuz fast
 
 	unsigned int seed;			// seed for the xor random number generator
@@ -71,10 +72,11 @@ public:
 		FPS = mazeFilledWidth + mazeFilledHeight;
 		TRAIL_LENGTH = FPS * 0.2;
 		
-		maze = new uint8_t[mazeFilledWidth * mazeFilledHeight];		// 2x2 nodes, each cell describes a path/wall and if it has been visited during solving
-		mazeAttributes = new uint8_t[MAZE_WIDTH * MAZE_HEIGHT];		// each cell describes if it is up, left, down, right, and if it has been visited during generating
-		distances = new size_t[mazeFilledWidth * mazeFilledHeight];	// each cell describes the distance from the player to that cell
-		playerTrail = new vi2d[TRAIL_LENGTH];						// a trail behind the player, completely cosmetics
+		maze = new uint8_t[mazeFilledWidth * mazeFilledHeight];			// 2x2 nodes, each cell describes a path/wall and if it has been visited during solving
+		mazeAttributes = new uint8_t[MAZE_WIDTH * MAZE_HEIGHT];			// each cell describes if it is up, left, down, right, and if it has been visited during generating
+		distances = new size_t[mazeFilledWidth * mazeFilledHeight];		// each cell describes the distance from the player to that cell
+		drawingColor = new float[mazeFilledWidth * mazeFilledHeight];	// purely cosmetic, used to fade between past and current distance colors
+		playerTrail = new vi2d[TRAIL_LENGTH];							// a trail behind the player, purely cosmetic
 		
 		seed = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 	}
@@ -84,6 +86,7 @@ public:
 		delete[] maze;
 		delete[] mazeAttributes;
 		delete[] distances;
+		delete[] drawingColor;
 		delete[] playerTrail;
 	}
 
@@ -97,8 +100,10 @@ public:
 
 	void RandomizeMaze()
 	{
-		memset(maze, 0, sizeof(uint8_t) * mazeFilledWidth * mazeFilledHeight);		// set all cells to no path
-		memset(mazeAttributes, 0, sizeof(uint8_t) * MAZE_WIDTH * MAZE_HEIGHT);	// set all cells to no connections and not visited
+		memset(maze, 0, sizeof(uint8_t) * mazeFilledWidth * mazeFilledHeight);			// set all cells to no path
+		memset(mazeAttributes, 0, sizeof(uint8_t) * MAZE_WIDTH * MAZE_HEIGHT);			// set all cells to no connections and not visited
+		for (int i = mazeFilledWidth * mazeFilledHeight; i--;)							// set all colors to white
+			drawingColor[i] = 255;
 
 		vector<vi2d> stack;
 		stack.push_back({ MAZE_WIDTH / 2, MAZE_HEIGHT / 2 });						// start at the middle of the maze
@@ -141,17 +146,14 @@ public:
 			{
 				mazex = x << 1;	// convert to cell space
 				mazey = y << 1;	// convert to cell space
-				maze[mazey * mazeFilledWidth + mazex] |= PATH;	// set the center cell to path
-				if (mazeAttributes[y * MAZE_WIDTH + x] & UP)
-					maze[(mazey + 1) * mazeFilledWidth + mazex] |= PATH;		// set the top cell to path
-				if (mazeAttributes[y * MAZE_WIDTH + x] & RIGHT)
-					maze[mazey * mazeFilledWidth + mazex + 1] |= PATH;	// set the right cell to path
+				
+				maze[mazey * mazeFilledWidth + mazex] |= PATH;										// set the center cell to path
+				if (mazeAttributes[y * MAZE_WIDTH + x] & UP || (Rand2() % MUTATION_RATE == 0))		// if the cell has a path up or if it is a mutation
+					maze[(mazey + 1) * mazeFilledWidth + mazex] |= PATH;							// set the top cell to path
+				if (mazeAttributes[y * MAZE_WIDTH + x] & RIGHT || (Rand2() % MUTATION_RATE == 0))	// if the cell has a path right or if it is a mutation
+					maze[mazey * mazeFilledWidth + mazex + 1] |= PATH;								// set the right cell to path
 			}
 		}
-		
-		for (int i = mazeFilledWidth * mazeFilledHeight; i--;)	// remove some walls so there isn't just a single path
-			if (Rand2() % MUTATION_RATE == 0)
-				maze[i] |= PATH;
 	}
 
 	void RandomizePlayer()
@@ -233,10 +235,16 @@ public:
 
 	void DrawMaze()
 	{
+		float color;
 		for (int x = mazeFilledWidth; x--;)
 			for (int y = mazeFilledHeight; y--;)
 				if (maze[y * mazeFilledWidth + x])	// if the cell is a path
-					Draw(x, y, olc::Pixel(255, min(size_t(255), distances[y * mazeFilledWidth + x] * 255 / (largestDistance + 1)), 255));	// megenta
+				{
+					color = distances[y * mazeFilledWidth + x] * 255 / (largestDistance + 1) - drawingColor[y * mazeFilledWidth + x];
+					color = color < 0 ? -0.5f : 0.5f;
+					drawingColor[y * mazeFilledWidth + x] = min(255.0f, drawingColor[y * mazeFilledWidth + x] + color);
+					Draw(x, y, olc::Pixel(255, drawingColor[y * mazeFilledWidth + x], 255));	// megenta
+				}
 	}
 
 	void DrawGoalTrail()
@@ -305,8 +313,10 @@ int main()
 {
 	const int MAZE_WIDTH = 200;		// width of the maze
 	const int MAZE_HEIGHT = 100;	// height of the maze
-	const int MUTATION_RATE = 100;	// 1 in 100
-	const int PIXEL_SIZE = min(900 / MAZE_WIDTH, 450 / MAZE_HEIGHT);	// size of the pixels
+	const int MUTATION_RATE = 100;	// 1 in 100 chance to flip a cell into a path
+	const int WINDOW_WIDTH = 900;	// width of the window
+	const int WINDOW_HEIGHT = 500;	// height of the window
+	const int PIXEL_SIZE = min(WINDOW_WIDTH / MAZE_WIDTH, WINDOW_HEIGHT / MAZE_HEIGHT);	// size of the pixels
 
 	Maze demo(MAZE_WIDTH, MAZE_HEIGHT, MUTATION_RATE);
 	if (demo.Construct(demo.mazeFilledWidth, demo.mazeFilledHeight, PIXEL_SIZE, PIXEL_SIZE))
