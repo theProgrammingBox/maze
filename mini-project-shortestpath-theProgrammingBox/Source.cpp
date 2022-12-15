@@ -233,7 +233,7 @@ public:
 				if (maze[y * mazeFilledWidth + x])	// if the cell is a path
 				{
 					color = distances[y * mazeFilledWidth + x] * 255 / (largestDistance + 1) - drawingColor[y * mazeFilledWidth + x];
-					color = color < 0 ? -0.5f : 0.5f;
+					color *= 0.006;
 					drawingColor[y * mazeFilledWidth + x] = min(255.0f, drawingColor[y * mazeFilledWidth + x] + color);
 					Draw(x, y, olc::Pixel(255, drawingColor[y * mazeFilledWidth + x], 255));	// megenta
 				}
@@ -319,9 +319,9 @@ int main()
 	const int WINDOW_HEIGHT = 500;	// height of the window
 	const int PIXEL_SIZE = min(WINDOW_WIDTH / MAZE_WIDTH, WINDOW_HEIGHT / MAZE_HEIGHT);	// size of the pixels
 
-	Maze demo(MAZE_WIDTH, MAZE_HEIGHT, MUTATION_RATE);
-	if (demo.Construct(demo.mazeFilledWidth, demo.mazeFilledHeight, PIXEL_SIZE, PIXEL_SIZE))
-		demo.Start();
+	Maze program(MAZE_WIDTH, MAZE_HEIGHT, MUTATION_RATE);
+	if (program.Construct(program.mazeFilledWidth, program.mazeFilledHeight, PIXEL_SIZE, PIXEL_SIZE))
+		program.Start();
 
 	return 0;
 }
