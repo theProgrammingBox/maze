@@ -1,20 +1,20 @@
 #include <iostream>
+#include <vector>
 #include <queue>
-#include <chrono>
 #include <algorithm>
+#include <chrono>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
 
-using olc::vi2d;
-using olc::Pixel;
 using std::vector;
 using std::queue;
+using std::min;
 using std::chrono::high_resolution_clock;
 using std::chrono::duration_cast;
 using std::chrono::nanoseconds;
-using std::max;
-using std::min;
+using olc::vi2d;
+using olc::Pixel;
 
 class Maze : public olc::PixelGameEngine
 {
@@ -27,15 +27,15 @@ public:
 	int mazeFilledHeight;		// Height of the maze including the walls
 
 	size_t largestDistance;		// orthoganal distance from the goal to player
-	
+
 	uint8_t* maze;				// maze with walls
 	uint8_t* mazeAttributes;	// path directions from each maze component to its neighbours and other attributes
 	size_t* distances;			// orthoganal distance from each cell away from the goal
 	float* drawingColor;		// purely cosmetic, used to fade between past and current distance colors
-	
+
 	vi2d playerPosition;		// same as a pair, stores x and y coordinates of the player
 	vi2d goalPosition;			// same as a pair, stores x and y coordinates of the goal
-	
+
 	const vi2d directions[4] = { {0, 1}, {-1, 0}, {0, -1}, {1, 0} };	// directions to move in the maze
 
 	enum MazeBits
@@ -57,27 +57,27 @@ public:
 	int trailIndex = 0;			// keeps track of the circular array, instead of using a queue cuz fast
 
 	unsigned int seed;			// seed for the xor random number generator
-	
+
 	Maze(int MAZE_WIDTH, int MAZE_HEIGHT, int MUTATION_RATE)
 	{
 		sAppName = "Maze Generator and Solver";
-		
+
 		this->MAZE_WIDTH = MAZE_WIDTH;
 		this->MAZE_HEIGHT = MAZE_HEIGHT;
 		this->MUTATION_RATE = MUTATION_RATE;
 
 		mazeFilledWidth = MAZE_WIDTH * 2;	// each node contains the main path and side paths connecting to its neighbours, EX: P = PATH	PW	PP	PW
 		mazeFilledHeight = MAZE_HEIGHT * 2;	// each node contains the main path and side paths connecting to its neighbours, W = WALL		WW	WW	PW
-		
+
 		FPS = mazeFilledWidth + mazeFilledHeight;
 		TRAIL_LENGTH = FPS * 0.2;
-		
+
 		maze = new uint8_t[mazeFilledWidth * mazeFilledHeight];			// 2x2 nodes, each cell describes a path/wall and if it has been visited during solving
 		mazeAttributes = new uint8_t[MAZE_WIDTH * MAZE_HEIGHT];			// each cell describes if it is up, left, down, right, and if it has been visited during generating
 		distances = new size_t[mazeFilledWidth * mazeFilledHeight];		// each cell describes the distance from the player to that cell
 		drawingColor = new float[mazeFilledWidth * mazeFilledHeight];	// purely cosmetic, used to fade between past and current distance colors
 		playerTrail = new vi2d[TRAIL_LENGTH];							// a trail behind the player, purely cosmetic
-		
+
 		seed = duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 	}
 
@@ -146,7 +146,7 @@ public:
 			{
 				mazex = x << 1;	// convert to cell space
 				mazey = y << 1;	// convert to cell space
-				
+
 				maze[mazey * mazeFilledWidth + mazex] |= PATH;										// set the center cell to path
 				if (mazeAttributes[y * MAZE_WIDTH + x] & UP || (Rand2() % MUTATION_RATE == 0))		// if the cell has a path up or if it is a mutation
 					maze[(mazey + 1) * mazeFilledWidth + mazex] |= PATH;							// set the top cell to path
@@ -162,7 +162,7 @@ public:
 		{	// randomize player position
 			playerPosition = { int(Rand2() % mazeFilledWidth), int(Rand2() % mazeFilledHeight) };
 		} while (!(maze[playerPosition.y * mazeFilledWidth + playerPosition.x] & PATH || goalPosition == playerPosition));
-		
+
 		for (int i = TRAIL_LENGTH; i--;) playerTrail[i] = playerPosition;	// player trail reset
 	}
 
@@ -184,13 +184,13 @@ public:
 		{
 			RandomizeGoal();	// ensure goal is on a path
 		}
-		
+
 		memset(distances, -1, sizeof(size_t) * mazeFilledWidth * mazeFilledHeight);	// set all distances to -1
 		distances[goalPosition.y * mazeFilledWidth + goalPosition.x] = 0;			// set the goal distance to 0
-		
+
 		queue<vi2d> queue;
 		queue.push(goalPosition);	// add the goal to the queue
-		
+
 		vi2d current;
 		vi2d nextPos;
 		while (!queue.empty())
@@ -208,7 +208,7 @@ public:
 				}
 			}
 		}
-		
+
 		largestDistance = distances[playerPosition.y * mazeFilledWidth + playerPosition.x];	// set the largest distance to the distance to the player
 		shortestPath.resize(largestDistance);	// resize the shortest path vector to the largest distance
 		current = playerPosition;				// start at the player position
@@ -235,7 +235,7 @@ public:
 					color = distances[y * mazeFilledWidth + x] * 255 / (largestDistance + 1) - drawingColor[y * mazeFilledWidth + x];
 					color *= 0.006;
 					drawingColor[y * mazeFilledWidth + x] = min(255.0f, drawingColor[y * mazeFilledWidth + x] + color);
-					Draw(x, y, olc::Pixel(255, drawingColor[y * mazeFilledWidth + x], 255));	// megenta
+					Draw(x, y, olc::Pixel(255, drawingColor[y * mazeFilledWidth + x], 255));	// magenta
 				}
 	}
 
@@ -285,11 +285,11 @@ public:
 		DrawGoalTrail();
 		DrawPlayerTrail();
 	}
-	
+
 	bool OnUserCreate()
 	{
 		NewScene();
-		
+
 		return true;
 	}
 
@@ -297,7 +297,7 @@ public:
 	{
 		if (GetKey(olc::SPACE).bPressed)
 			NewScene();							// create a new scene when space is pressed
-		
+
 		numUpdateFrames += fElapsedTime * FPS;	// F / S * S = F
 		while (numUpdateFrames > 0)				// while there are frames to update
 		{
@@ -305,7 +305,7 @@ public:
 			MovePlayer(fElapsedTime);			// move the player
 			numUpdateFrames--;					// subtract a frame
 		}
-		
+
 		return true;
 	}
 };
