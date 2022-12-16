@@ -314,7 +314,7 @@ int main()
 {
 	const int MAZE_WIDTH = 200;		// width of the maze
 	const int MAZE_HEIGHT = 100;	// height of the maze
-	const int MUTATION_RATE = 100;	// 1 in 100 chance to flip a cell into a path
+	const int MUTATION_RATE = 80;	// 1 in 80 chance to flip a cell into a path
 	const int WINDOW_WIDTH = 900;	// width of the window
 	const int WINDOW_HEIGHT = 500;	// height of the window
 	const int PIXEL_SIZE = min(WINDOW_WIDTH / MAZE_WIDTH, WINDOW_HEIGHT / MAZE_HEIGHT);	// size of the pixels
